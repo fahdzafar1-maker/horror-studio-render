@@ -65,11 +65,20 @@ def generate(job_id: str, target: str, blocks: list, model: str, voice: str,
                     "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
                 },
             }
-            resp = gemini.generate(model, body, timeout=300)
-            parts = list(gemini.inline_parts(resp))
+            # Gemini TTS safety refusals on horror narration are stochastic: the same block
+            # usually voices fine on a second or third try.
+            parts, why = [], ""
+            for attempt in range(4):
+                resp = gemini.generate(model, body, timeout=300)
+                parts = list(gemini.inline_parts(resp))
+                if parts:
+                    break
+                why = gemini.block_reason(resp) or "no reason"
+                if progress:
+                    progress(n, len(blocks), f"block {b['index']} refused ({why}), retry {attempt + 1}")
+                time.sleep(throttle_s + 3)
             if not parts:
-                raise gemini.GeminiError(f"TTS returned no audio for block {b['index']} "
-                                         f"({gemini.block_reason(resp) or 'no reason'})")
+                raise gemini.GeminiError(f"TTS returned no audio for block {b['index']} ({why}) after 4 tries")
             mime, raw = parts[0]
             rate = int((re.search(r"rate=(\d+)", mime) or [None, TTS_SR])[1])
             pcm = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
