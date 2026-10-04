@@ -17,7 +17,7 @@ def _beat_order(beats, sentence_index):
 
 
 def render(job_id: str, options: dict = None, progress=None) -> dict:
-    o = {"tail_silence": 2.8, "end_screen": 20.0, "burn_subtitles": False, "crf": 21, "grain": 0,
+    o = {"tail_silence": 2.8, "end_screen": 20.0, "burn_subtitles": False, "crf": 21, "grain": 4,
          "auto_drone": True, "levels": {}, "channel_name": "", **(options or {})}
     timings = get_data(job_id, "timings")
     beats_doc = get_data(job_id, "beats")
@@ -82,7 +82,10 @@ def render(job_id: str, options: dict = None, progress=None) -> dict:
             jobs.append(dict(img=last_img, out=out, frames=f1 - f0, mot=mot, w=W, h=H,
                              fade_in=(0.4 if k == 0 else (0.6 if (si == 0 and ph != prev_phase) else 0)),
                              fade_out=(1.6 if is_last else 0),
-                             flicker=(ph in (7, 8, 9) and b.get("subject") == "entity"),
+                             # dread builds visually: flicker on entity frames from Pressure on,
+                             # on every third frame of the Point-blank/Climax; handheld shake at the climax
+                             flicker=(ph >= 6 and b.get("subject") == "entity") or (ph in (8, 9) and k % 3 == 0),
+                             shake_amp=(3.0 if ph in (8, 9) else 0.0),
                              grain=o["grain"], crf=o["crf"]))
             files.append(out)
             k += 1

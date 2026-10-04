@@ -80,8 +80,15 @@ def pick_motion(shot_hint: str, idx: int, sub: int, rnd: random.Random):
     return ["push_in", "pan_lr", "pull_out", "push_in", "pan_rl", "drift_up"][idx % 6]
 
 
+def shake(amp):
+    """Handheld unease: overscan 4 % and drift the crop a few pixels (two incommensurate sines)."""
+    return (f"scale=iw*1.04:-2,crop=iw/1.04:ih/1.04:"
+            f"x='(in_w-out_w)/2+{amp:.1f}*sin(n*0.83)+{amp * 0.5:.1f}*sin(n*2.3)':"
+            f"y='(in_h-out_h)/2+{amp * 0.7:.1f}*cos(n*0.61)+{amp * 0.4:.1f}*sin(n*1.9)'")
+
+
 def render_shot(img, out, frames, mot, w, h, fade_in=0.0, fade_out=0.0, flicker=False,
-                grain=0, crf=21, vertical=False):
+                grain=0, crf=21, vertical=False, shake_amp=0.0):
     z0, z1, x0, x1, y0, y1 = mot
     N = max(1, frames)
     still = prepare_still(img, w, h, vertical)
@@ -89,7 +96,8 @@ def render_shot(img, out, frames, mot, w, h, fade_in=0.0, fade_out=0.0, flicker=
           f"x='(iw-iw/zoom)*({x0:.3f}+({x1:.3f}-{x0:.3f})*on/{N})':"
           f"y='(ih-ih/zoom)*({y0:.3f}+({y1:.3f}-{y0:.3f})*on/{N})':"
           f"d={N}:s={w}x{h}:fps={FPS}")
-    vf = [zp] + ([grade(flicker, grain)] if (flicker or grain) else [])
+    vf = [zp] + ([shake(shake_amp), f"scale={w}:{h}"] if shake_amp > 0 else []) + \
+        ([grade(flicker, grain)] if (flicker or grain) else [])
     dur = N / FPS
     if fade_in > 0:
         vf.append(f"fade=t=in:st=0:d={fade_in:.2f}")

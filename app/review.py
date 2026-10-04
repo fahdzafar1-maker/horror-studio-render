@@ -27,6 +27,9 @@ def page(job_id: str) -> str:
              f"<p class=meta>{html.escape(job_id)} · {rl.get('duration', 0)//60:.0f} min · "
              f"sync {'OK' if qa.get('sync_ok') else 'CHECK'} · {qa.get('size_mb', '?')} MB · "
              f"loudness in {rl.get('mix', {}).get('loudness', {}).get('input_i', '?')} → -14 LUFS</p>"]
+    if seo.get("summary_ur"):
+        parts.append(_box("Kahani ka khulasa (Roman Urdu, sirf aap ke liye, publish nahi hota)",
+                          seo["summary_ur"], 8))
     if os.path.exists(job_path(job_id, "out", "master.mp4")):
         parts.append(f"<video controls preload=metadata src='{_u(job_id, 'out/master.mp4')}'></video>"
                      f"<p><a href='{_u(job_id, 'out/master.mp4')}' download>Download master.mp4</a> · "
