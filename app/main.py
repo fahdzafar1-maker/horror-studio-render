@@ -9,7 +9,7 @@ import shutil
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import gemini, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
+from . import drive, gemini, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
 from .config import MOCK_MODE, RENDER_KEY, WORK_DIR, PUBLIC_BASE_URL, font
 from .storage import cleanup_intermediates, cleanup_old_jobs, get_data, job_path, put_data, safe
 
@@ -167,6 +167,28 @@ def render_shorts_ep(request: Request, p: dict = Body(...)):
 def thumb(request: Request, p: dict = Body(...)):
     _auth(request)
     return thumbnail.compose(p["job_id"], p["items"])
+
+
+# ------------------------------------------------------------------ Google Drive archive
+@app.get("/jobs/{job_id}/sizes")
+def sizes(job_id: str, names: str, request: Request):
+    """Byte sizes of finished files, so n8n can open Drive upload sessions of the right length."""
+    _auth(request)
+    out = {}
+    for rel in (n for n in names.split(",") if n):
+        if ".." in rel:
+            raise HTTPException(400, "bad path")
+        if rel == "out/upload_text.txt":
+            drive.write_upload_text(safe(job_id))
+        p = job_path(safe(job_id), *rel.split("/"))
+        out[rel] = os.path.getsize(p) if os.path.isfile(p) else None
+    return out
+
+
+@app.post("/drive/upload")
+def drive_upload(request: Request, p: dict = Body(...)):
+    _auth(request)
+    return tasks.submit("drive", p["job_id"], drive.upload, safe(p["job_id"]), p["files"])
 
 
 # ------------------------------------------------------------------ review + files
