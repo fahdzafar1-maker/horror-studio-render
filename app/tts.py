@@ -184,5 +184,32 @@ def finalize(job_id: str, target: str = "main", gaps: dict = None, voice_fx: str
             "phase_starts": phase_starts, "whisper_error": align._model_err}
 
 
+def voice_shorts(job_id: str, shorts: list, model: str, voice: str, progress=None) -> dict:
+    """shorts: [{target, style, lines:[str]}] — one fast narration per Short, voiced + aligned in one task.
+
+    Gemini TTS safety refusals are stochastic on horror text, so each Short gets 3 attempts
+    before the task fails."""
+    out = {}
+    for n, s in enumerate(shorts):
+        target = re.sub(r"[^a-z0-9_]", "", s["target"]) or f"short{n + 1}"
+        blocks = [{"index": 0, "phase": target, "style": s.get("style", ""),
+                   "sentences": [{"id": f"{target}_{i + 1:02d}", "text": t} for i, t in enumerate(s["lines"])]}]
+        last = None
+        for attempt in range(3):
+            try:
+                generate(job_id, target, blocks, model, voice, throttle_s=2, reset=True)
+                last = None
+                break
+            except gemini.GeminiError as e:
+                last = e
+                time.sleep(5)
+        if last:
+            raise last
+        out[target] = finalize(job_id, target, {"default": 0.25, "phase_change": 0.25}, "intimate")
+        if progress:
+            progress(n + 1, len(shorts), f"{target} voiced ({out[target]['duration']}s)")
+    return out
+
+
 def mock_b64_wav(text: str) -> str:  # used by tests only
     return base64.b64encode(_mock_voice(text).tobytes()).decode()

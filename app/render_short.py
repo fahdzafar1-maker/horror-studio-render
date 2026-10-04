@@ -76,7 +76,8 @@ def render(job_id: str, parts: list, channel_name: str = "", progress=None) -> d
     for n, p in enumerate(parts):
         part = int(p["part"])
         out = job_path(job_id, "out", f"short_{part}.mp4")
-        if part in (1, 2):
+        target = p.get("target") or ("short3" if part == 3 else "")
+        if not target:
             a, b = by_id.get(p["from"]), by_id.get(p["to"])
             if not a or not b:
                 raise RuntimeError(f"short {part}: sentence ids not found ({p.get('from')}..{p.get('to')})")
@@ -98,20 +99,21 @@ def render(job_id: str, parts: list, channel_name: str = "", progress=None) -> d
             ass = os.path.join(work, f"s{part}.ass")
             write_ass_kinetic(words, ass)
             _finish(silent, aud, ass, out, ("FULL STORY", "on the channel now"), t1 - t0, dur)
-        elif part == 3:
-            t3 = get_data(job_id, "timings_short3")
+        else:
+            # Voice-driven Short: its own fast narration (written for the Short) over the episode's frames.
+            t3 = get_data(job_id, f"timings_{target}")
             if not t3:
-                raise RuntimeError("short 3 voice missing — run /tts/generate + /audio/finalize target=short3")
-            voice = job_path(job_id, "audio", "short3", "voice.wav")
+                raise RuntimeError(f"{target} voice missing — run /shorts/voice (or /tts/generate + /audio/finalize target={target})")
+            voice = job_path(job_id, "audio", target, "voice.wav")
             first = t3["sentences"][0]["id"] if t3["sentences"] else None
             last = t3["sentences"][-1]["id"] if t3["sentences"] else None
             cues = [{"at": first, "cue": "drone_pulse", "volume": "mid"},
                     {"at": first, "cue": "sub_drop", "volume": "mid"}]
             if last:
                 cues.append({"at": last, "cue": "riser_short", "volume": "low"})
-            aud = os.path.join(work, "s3.wav")
-            info = mixer.build_mix(voice, t3, cues, os.path.join(work, "s3_raw.wav"), aud,
-                                   tail_silence=0.5, end_screen=4.5, auto_drone=False, seed=7)
+            aud = os.path.join(work, f"s{part}.wav")
+            info = mixer.build_mix(voice, t3, cues, os.path.join(work, f"s{part}_raw.wav"), aud,
+                                   tail_silence=0.5, end_screen=4.5, auto_drone=False, seed=7 + part)
             total = min(59.5, info["duration"])
             imgs = [i for i in p.get("images", []) if os.path.exists(img_path(job_id, i))]
             if not imgs:
@@ -124,17 +126,17 @@ def render(job_id: str, parts: list, channel_name: str = "", progress=None) -> d
                     f0 = round(sum(j["frames"] for j in jobs))
                     frames = round((i * seg + (si + 1) * sd) * FPS) - f0
                     kind = "punch" if si % 2 else "push_in"
-                    outp = os.path.join(work, f"p3_{k:03d}.mp4")
+                    outp = os.path.join(work, f"v{part}_{k:03d}.mp4")
                     jobs.append(dict(img=img_path(job_id, iid), out=outp, frames=frames,
                                      mot=video.motion(kind, sd, 0.03, rnd), w=VW, h=VH, vertical=True,
                                      fade_in=0.25 if k == 0 else 0, crf=20))
                     files.append(outp)
             video.render_many(jobs)
-            silent = video.concat(files, os.path.join(work, "s3_v.mp4"))
-            ass = os.path.join(work, "s3.ass")
+            silent = video.concat(files, os.path.join(work, f"s{part}_v.mp4"))
+            ass = os.path.join(work, f"s{part}.ass")
             write_ass_kinetic(t3["words"], ass)
-            _finish(silent, aud, ass, out, ("SUBSCRIBE", "full story on the channel"),
-                    info["end_screen_start"], total)
+            end = ("SUBSCRIBE", "full story on the channel") if part == 3 else ("FULL STORY", "on the channel now")
+            _finish(silent, aud, ass, out, end, info["end_screen_start"], total)
         results[f"short_{part}"] = {"file": f"out/short_{part}.mp4", "duration": round(duration(out), 2)}
         if progress:
             progress(n + 1, len(parts), f"short {part} done")

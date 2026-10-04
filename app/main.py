@@ -105,6 +105,12 @@ def tts_generate(request: Request, p: dict = Body(...)):
                         bool(p.get("reset", False)))
 
 
+@app.post("/shorts/voice")
+def shorts_voice(request: Request, p: dict = Body(...)):
+    _auth(request)
+    return tasks.submit("svoice", p["job_id"], tts.voice_shorts, p["job_id"], p["shorts"], p["model"], p["voice"])
+
+
 @app.post("/audio/finalize")
 def audio_finalize(request: Request, p: dict = Body(...)):
     _auth(request)
