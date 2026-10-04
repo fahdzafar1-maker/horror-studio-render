@@ -11,6 +11,30 @@ from .config import FPS, RENDER_THREADS
 from .util import ffmpeg
 
 
+def bars_crop(img):
+    """Image models sometimes paint cinematic letterbox bars into a 16:9 still.
+    Return an ffmpeg crop that removes them ('' if there are none).
+
+    A bar = leading rows that are near-black, ending in a SHARP step up to the picture
+    (a dark night sky fades in gradually and is left alone). Letterbox bars come in
+    matching pairs, so a single dark band (e.g. a dashboard) is never cropped."""
+    a = np.asarray(Image.open(img).convert("L")).astype(np.float32)
+    H, W = a.shape
+
+    def bar(rows):
+        n = 0
+        while n < H // 4 and rows[n].mean() < 12 and np.percentile(rows[n], 90) < 22:
+            n += 1
+        if n < 0.02 * H or n + 6 >= H:
+            return 0
+        return n if rows[n + 6].mean() - rows[max(0, n - 3)].mean() > 8 else 0
+
+    top, bottom = bar(a), bar(a[::-1])
+    if not top or not bottom or abs(top - bottom) > 0.25 * max(top, bottom):
+        return ""
+    return f"crop={W}:{H - top - bottom}:0:{top},"
+
+
 def prepare_still(img, w, h, vertical=False):
     """Crop to 2x frame size + bake the horror grade and vignette into the still ONCE.
 
@@ -23,12 +47,13 @@ def prepare_still(img, w, h, vertical=False):
     if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(img):
         return out
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    debar = bars_crop(img)
     if vertical:
         pre = f"scale=-2:{H2},crop={W2}:{H2}:(iw-{W2})/2:0"
     else:
         pre = f"scale={W2}:{H2}:force_original_aspect_ratio=increase,crop={W2}:{H2}"
     tmp = out + ".tmp.png"
-    ffmpeg("-i", img, "-vf", pre + ",eq=contrast=1.08:brightness=-0.025:saturation=0.78,"
+    ffmpeg("-i", img, "-vf", debar + pre + ",eq=contrast=1.08:brightness=-0.025:saturation=0.78,"
            "colorbalance=rs=-0.02:bs=0.035:rm=-0.01:bm=0.02", "-frames:v", "1", tmp)
     im = np.asarray(Image.open(tmp).convert("RGB")).astype(np.float32)
     yy, xx = np.mgrid[0:H2, 0:W2]
