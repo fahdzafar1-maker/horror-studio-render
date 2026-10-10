@@ -59,13 +59,18 @@ def compose(job_id: str, items: list) -> dict:
                 xx = x if side == "left" else TW - 1 - x
                 gd.line([(xx, 0), (xx, TH)], fill=a)
             im = Image.composite(Image.new("RGB", (TW, TH), (0, 0, 0)), im, grad)
-            words = text.split()[:3]
+            words = text.split()[:4]   # n8n already drops texts longer than 4 words; never cut a phrase here
             fcol = {"yellow": (255, 214, 10), "red": (230, 30, 30)}.get(it.get("color"), (245, 245, 245))
             dr = ImageDraw.Draw(im)
             max_w, max_h = int(TW * 0.56), int(TH * 0.78)
-            # try 1 line, then 1 word per line; shrink font until it fits the text half
+            # try 1 line, then 2 balanced lines, then 1 word per line; shrink font until it fits the text half
+            half = (len(words) + 1) // 2
+            layouts = [[" ".join(words)]]
+            if len(words) >= 3:
+                layouts.append([" ".join(words[:half]), " ".join(words[half:])])
+            layouts.append(words)
             best = None
-            for lines in ([" ".join(words)], words):
+            for lines in layouts:
                 for size in range(210, 70, -6):
                     f = ImageFont.truetype(font("display"), size)
                     ws = [dr.textbbox((0, 0), ln, font=f, stroke_width=10)[2] for ln in lines]
