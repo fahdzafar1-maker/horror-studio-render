@@ -62,7 +62,8 @@ def compose(job_id: str, items: list) -> dict:
             words = text.split()[:4]   # n8n already drops texts longer than 4 words; never cut a phrase here
             fcol = {"yellow": (255, 214, 10), "red": (230, 30, 30)}.get(it.get("color"), (245, 245, 245))
             dr = ImageDraw.Draw(im)
-            max_w, max_h = int(TW * 0.56), int(TH * 0.78)
+            # text stays in its own side (<= 44 % of the width) so the centred subject is never covered
+            max_w, max_h = int(TW * 0.44), int(TH * 0.78)
             # try 1 line, then 2 balanced lines, then 1 word per line; shrink font until it fits the text half
             half = (len(words) + 1) // 2
             layouts = [[" ".join(words)]]
