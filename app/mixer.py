@@ -16,6 +16,7 @@ import re
 
 import numpy as np
 
+from . import music as musiclib
 from . import sfx
 from .config import SR
 from .util import db, ffmpeg, load_audio, run, write_wav
@@ -29,6 +30,9 @@ DEFAULT_LEVELS = {
     "hit_low": -13.0, "hit_mid": -8.0,     # on -3 dBFS-peak files
     "drone_start": -18.0, "drone_end": -10.0,
     "duck_beds": -10.0, "duck_hits": -3.0,
+    # continuous background music (on -24 LUFS files): present in the pauses, ~20 dB under the voice
+    # while it speaks, swelling a little from Pressure to the Climax. With music on, beds step back.
+    "music": -7.0, "music_climax": -3.5, "duck_music": -9.0, "beds_with_music": -4.0,
     "end_screen_bed": -12.0,
 }
 PAN_CUES = {"footsteps_gravel", "footsteps_wood", "knock_three", "scratch_wall", "glass_tap",
@@ -79,9 +83,13 @@ def _pan(a, p):
 
 def build_mix(voice_path: str, timings: dict, cues: list, out_raw: str, out_final: str,
               tail_silence=2.8, end_screen=20.0, auto_drone=True, levels=None, seed=1,
-              voice_offset=0.0) -> dict:
+              voice_offset=0.0, music=True) -> dict:
     L = {**DEFAULT_LEVELS, **(levels or {})}
     rnd = random.Random(seed)
+    playlist = musiclib.playlist(seed) if music else []
+    if playlist:
+        for k in ("bed_low", "bed_mid", "drone_start", "drone_end"):
+            L[k] += L["beds_with_music"]
     voice = load_audio(voice_path, SR, 1)[:, 0]
     v_end = voice_offset + len(voice) / SR
     total = v_end + tail_silence + end_screen
@@ -199,6 +207,38 @@ def build_mix(voice_path: str, timings: dict, cues: list, out_raw: str, out_fina
             mix[s0:s0 + n] += a * curve[:, None]
             placed.append({"cue": "auto_drone", "t": round(t0, 2), "until": round(t1, 2)})
 
+    # ---- background music: tracks back to back with 3 s crossfades, from 0 s until the ambience fades
+    music_used = []
+    if playlist:
+        n = int(min(total, v_end + 1.5) * SR)
+        track = np.zeros((n, 2), np.float32)
+        xf = int(3.0 * SR)
+        fin = np.sqrt(np.linspace(0, 1, xf))[:, None].astype(np.float32)
+        pos, i = 0, 0
+        while pos < n and i < 60:
+            path = playlist[i % len(playlist)]
+            a = load_audio(path, SR, 2)
+            if len(a) > 3 * xf:
+                if pos > 0:
+                    a[:xf] *= fin
+                a[-xf:] *= fin[::-1]
+                m = min(len(a), n - pos)
+                track[pos:pos + m] += a[:m]
+                if path not in music_used:
+                    music_used.append(path)
+                pos += len(a) - xf
+            i += 1
+        lev = np.full(nC, db(L["music"]), np.float32)
+        if t_pressure and t_reveal and t_reveal > t_pressure + 5:
+            _ramp(lev, t_pressure, t_reveal - 0.75, db(L["music"]), db(L["music_climax"]))
+            lev[int((t_reveal - 0.75) * CR):] = db(L["music"])
+        duck_music = 1 - sm * (1 - db(L["duck_music"]))
+        curve = _apply_gain_curve(duck_music * bed_mask * lev, 0.0, n)
+        fi = min(n // 2, int(2.0 * SR))
+        curve[:fi] *= np.linspace(0, 1, fi)
+        mix[:n] += track * curve[:, None]
+        placed.append({"cue": "music", "t": 0.0, "until": round(n / SR, 2), "tracks": len(music_used)})
+
     # ---- hits
     for c in cues:
         name = c.get("cue")
@@ -247,7 +287,8 @@ def build_mix(voice_path: str, timings: dict, cues: list, out_raw: str, out_fina
     write_wav(out_raw, mix, SR, subtype="FLOAT")
     loud = master(out_raw, out_final)
     return {"duration": round(total, 3), "voice_end": round(v_end, 3), "end_screen_start": round(t_end, 3),
-            "cues_placed": len(placed), "cues_skipped": skipped[:30], "placements": placed, "loudness": loud}
+            "cues_placed": len(placed), "cues_skipped": skipped[:30], "placements": placed, "loudness": loud,
+            "music": musiclib.credits(music_used)}
 
 
 def master(src: str, dst: str, target_i=-14.0, target_tp=-1.0) -> dict:

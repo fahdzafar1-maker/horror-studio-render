@@ -9,7 +9,7 @@ import shutil
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import drive, gemini, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
+from . import drive, gemini, music, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
 from .config import MOCK_MODE, RENDER_KEY, WORK_DIR, PUBLIC_BASE_URL, font
 from .storage import cleanup_intermediates, cleanup_old_jobs, get_data, job_path, put_data, safe
 
@@ -153,6 +153,20 @@ def sfx_build(request: Request, p: dict = Body(default={})):
 async def sfx_upload(name: str, request: Request, variant: int = 1):
     _auth(request)
     return sfx.save_upload(safe(name), variant, await request.body())
+
+
+# ------------------------------------------------------------------ background music library
+@app.get("/music/list")
+def music_list(request: Request):
+    _auth(request)
+    return music.listing()
+
+
+@app.post("/music/upload")
+async def music_upload(request: Request, filename: str, title: str = "", artist: str = ""):
+    """Raw file body; filename like 'Black Mass - Brian Bolger.mp3' gives title and artist."""
+    _auth(request)
+    return music.save_upload(filename, await request.body(), title, artist)
 
 
 # ------------------------------------------------------------------ render
