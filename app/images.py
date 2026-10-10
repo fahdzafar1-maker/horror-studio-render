@@ -10,6 +10,7 @@
 import base64
 import io
 import os
+import shutil
 import time
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -68,7 +69,7 @@ def generate(job_id: str, items: list, model: str, aspect: str = "16:9", size: s
     job_dir(job_id, "images")
     log_path = job_path(job_id, "images", "_log.json")
     log = load_json(log_path, {}) or {}
-    made = skipped = fell_back = 0
+    made = skipped = fell_back = reused = 0
     missing = []
     calls = 0
     for n, it in enumerate(items):
@@ -78,6 +79,13 @@ def generate(job_id: str, items: list, model: str, aspect: str = "16:9", size: s
             skipped += 1
             if progress:
                 progress(n + 1, len(items), f"{iid} exists")
+            continue
+        # The story returns to a place already shown -> reuse that frame instead of paying for a new one.
+        if it.get("copy_of") and os.path.exists(img_path(job_id, it["copy_of"])):
+            shutil.copyfile(img_path(job_id, it["copy_of"]), out)
+            reused += 1
+            if progress:
+                progress(n + 1, len(items), f"{iid} reuses {it['copy_of']}")
             continue
         if calls >= max_images:
             missing.append({"id": iid, "reason": "max_images cap reached"})
@@ -110,5 +118,5 @@ def generate(job_id: str, items: list, model: str, aspect: str = "16:9", size: s
         save_json(log_path, log)
         if progress:
             progress(n + 1, len(items), f"{iid} {'ok' if im is not None else 'MISSING'}")
-    return {"requested": len(items), "generated": made, "skipped": skipped,
+    return {"requested": len(items), "generated": made, "skipped": skipped, "reused": reused,
             "fallbacks": fell_back, "missing": missing, "paid_calls": calls}

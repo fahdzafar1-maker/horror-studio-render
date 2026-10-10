@@ -207,27 +207,39 @@ def build_mix(voice_path: str, timings: dict, cues: list, out_raw: str, out_fina
             mix[s0:s0 + n] += a * curve[:, None]
             placed.append({"cue": "auto_drone", "t": round(t0, 2), "until": round(t1, 2)})
 
-    # ---- background music: tracks back to back with 3 s crossfades, from 0 s until the ambience fades
+    # ---- background music: only the OPENING 30-50 s of each track (the owner's choice — that is where
+    # the dread is), rotating through the tracks in a reshuffled order each round, never the same track
+    # twice in a row, 3 s crossfades, from 0 s until the ambience fades.
     music_used = []
     if playlist:
         n = int(min(total, v_end + 1.5) * SR)
         track = np.zeros((n, 2), np.float32)
         xf = int(3.0 * SR)
         fin = np.sqrt(np.linspace(0, 1, xf))[:, None].astype(np.float32)
-        pos, i = 0, 0
-        while pos < n and i < 60:
-            path = playlist[i % len(playlist)]
-            a = load_audio(path, SR, 2)
-            if len(a) > 3 * xf:
-                if pos > 0:
-                    a[:xf] *= fin
-                a[-xf:] *= fin[::-1]
-                m = min(len(a), n - pos)
-                track[pos:pos + m] += a[:m]
-                if path not in music_used:
-                    music_used.append(path)
-                pos += len(a) - xf
-            i += 1
+        cache = {p: load_audio(p, SR, 2) for p in playlist}
+        order, last = [], None
+        pos, guard = 0, 0
+        while pos < n and guard < 500:
+            guard += 1
+            if not order:
+                order = playlist[:]
+                rnd.shuffle(order)
+                if len(order) > 1 and order[0] == last:
+                    order.append(order.pop(0))
+            path = order.pop(0)
+            last = path
+            seg_len = int(rnd.uniform(30.0, 50.0) * SR)
+            a = cache[path][:seg_len].copy()
+            if len(a) <= 3 * xf:
+                continue
+            if pos > 0:
+                a[:xf] *= fin
+            a[-xf:] *= fin[::-1]
+            m = min(len(a), n - pos)
+            track[pos:pos + m] += a[:m]
+            if path not in music_used:
+                music_used.append(path)
+            pos += len(a) - xf
         lev = np.full(nC, db(L["music"]), np.float32)
         if t_pressure and t_reveal and t_reveal > t_pressure + 5:
             _ramp(lev, t_pressure, t_reveal - 0.75, db(L["music"]), db(L["music_climax"]))
