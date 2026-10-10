@@ -97,11 +97,14 @@ def generate(job_id: str, target: str, blocks: list, model: str, voice: str,
 
 
 VOICE_FX = {
-    # intimate close-mic narrator: remove rumble, gentle glue compression, a little presence & air
-    "intimate": "highpass=f=75,lowpass=f=15500,"
-                "acompressor=threshold=-21dB:ratio=2.6:attack=8:release=160:makeup=2,"
-                "equalizer=f=180:t=q:w=1.2:g=1.5,equalizer=f=3200:t=q:w=1.4:g=1.8,"
-                "equalizer=f=7500:t=q:w=2:g=-1.5",
+    # Clear close-mic narrator. Measured on episode 4: the old chain left ~44 % of the voice energy
+    # below 500 Hz (boomy, muddy) and only ~42 % in the 2-8 kHz intelligibility band. This chain
+    # cuts rumble and mud, lifts presence, tames the resulting sibilance, then glues it.
+    "intimate": "highpass=f=100,highpass=f=100,"
+                "equalizer=f=160:t=q:w=1.0:g=-2,equalizer=f=320:t=q:w=1.2:g=-3,"
+                "equalizer=f=3000:t=q:w=1.3:g=3,equalizer=f=5500:t=q:w=1.6:g=2,"
+                "deesser=i=0.35:m=0.5:f=0.5,"
+                "acompressor=threshold=-22dB:ratio=3:attack=5:release=120:makeup=2",
     "clean": "highpass=f=70",
 }
 

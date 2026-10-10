@@ -23,10 +23,12 @@ from .util import db, ffmpeg, load_audio, run, write_wav
 CR = 100  # control rate (Hz) for envelopes
 
 DEFAULT_LEVELS = {
-    "bed_low": -9.0, "bed_mid": -5.0,      # on -24 LUFS files
+    # beds/drone sit ~3 dB further under the narration than before (measured voice-over-background
+    # was 18-19 dB median, 13 dB worst case on episode 4; target 20+ dB for a clear voice)
+    "bed_low": -10.0, "bed_mid": -7.0,     # on -24 LUFS files
     "hit_low": -13.0, "hit_mid": -8.0,     # on -3 dBFS-peak files
-    "drone_start": -17.0, "drone_end": -8.0,
-    "duck_beds": -7.0, "duck_hits": -3.0,
+    "drone_start": -18.0, "drone_end": -10.0,
+    "duck_beds": -10.0, "duck_hits": -3.0,
     "end_screen_bed": -12.0,
 }
 PAN_CUES = {"footsteps_gravel", "footsteps_wood", "knock_three", "scratch_wall", "glass_tap",
