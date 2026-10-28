@@ -47,7 +47,18 @@ def _tts_call(model, voice, prompt):
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
         },
     }
-    resp = gemini.generate(model, body, timeout=300)
+    # The preview TTS model now and then answers a random 400 INVALID_ARGUMENT for a request that
+    # works on the next try (2026-10-28, block 10 of 17). Retry it; after that let the ladder go on.
+    for attempt in range(3):
+        try:
+            resp = gemini.generate(model, body, timeout=300)
+            break
+        except gemini.GeminiError as e:
+            if "HTTP 400" not in str(e):
+                raise
+            if attempt == 2:
+                return None, "HTTP 400"
+            time.sleep(8)
     parts = list(gemini.inline_parts(resp))
     if not parts:
         return None, (gemini.block_reason(resp) or "no reason")
