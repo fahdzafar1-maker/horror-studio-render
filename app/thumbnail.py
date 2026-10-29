@@ -34,7 +34,7 @@ def _vignette(im, strength=0.65):
 
 
 def compose(job_id: str, items: list) -> dict:
-    """items: [{id, image_id, text, side: left|right, color: white|yellow|red}]"""
+    """items: [{id, image_id, text, side: left|right, color: white|yellow|red, subtext?}]"""
     out = []
     for it in items:
         src = img_path(job_id, it["image_id"])
@@ -81,12 +81,26 @@ def compose(job_id: str, items: list) -> dict:
                             best = (lines, size, f, ws, hs)
                         break
             lines, size, f, ws, hs = best or ([" ".join(words)], 72, ImageFont.truetype(font("display"), 72), [max_w], [80])
-            y = (TH - sum(hs) - 10 * (len(lines) - 1)) // 2
+            # optional small label under the hook, e.g. "COMPLETE STORY"
+            sub = (it.get("subtext") or "").strip().upper()
+            sf = sw = sh = None
+            if sub:
+                for ssize in range(int(size * 0.42), 30, -2):
+                    sf = ImageFont.truetype(font("display"), ssize)
+                    bb = dr.textbbox((0, 0), sub, font=sf, stroke_width=6)
+                    sw, sh = bb[2], bb[3]
+                    if sw <= max_w:
+                        break
+            block = sum(hs) + 10 * (len(lines) - 1) + (sh + 24 if sub else 0)
+            y = (TH - block) // 2
             for ln, wdt, hgt in zip(lines, ws, hs):
                 x = 55 if side == "left" else TW - wdt - 55
                 dr.text((x + 6, y + 8), ln, font=f, fill=(0, 0, 0), stroke_width=10, stroke_fill=(0, 0, 0))
                 dr.text((x, y), ln, font=f, fill=fcol, stroke_width=10, stroke_fill=(0, 0, 0))
                 y += hgt + 10
+            if sub:
+                x = 55 if side == "left" else TW - sw - 55
+                dr.text((x, y + 14), sub, font=sf, fill=(245, 245, 245), stroke_width=6, stroke_fill=(0, 0, 0))
         path = job_path(job_id, "out", f"thumb_{it['id']}.jpg")
         im.save(path, "JPEG", quality=92)
         small = im.resize((640, 360), Image.LANCZOS)
