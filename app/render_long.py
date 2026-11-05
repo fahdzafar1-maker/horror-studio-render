@@ -4,6 +4,7 @@ import random
 
 from . import mixer, video
 from .config import FPS, W, H, font, SR
+from .clips import clip_path
 from .images import img_path
 from .storage import get_data, job_dir, job_path, put_data
 from .subs import cues_from_words, write_srt
@@ -50,7 +51,7 @@ def render(job_id: str, options: dict = None, progress=None) -> dict:
     phase_of = {s["id"]: int(s.get("phase") or 0) for s in sents}
     starts = [0.0] + [by_id[b["at"]]["start"] for b in beats[1:]]
     ends = starts[1:] + [end_start]
-    jobs, files, missing = [], [], []
+    jobs, files, missing, clips_used = [], [], [], []
     last_img = None
     # first available image for leading gaps
     avail = [b for b in beats if os.path.exists(img_path(job_id, b["id"]))]
@@ -69,9 +70,29 @@ def render(job_id: str, options: dict = None, progress=None) -> dict:
         dur = ends[i] - starts[i]
         if dur <= 0.05:
             continue
+        t = starts[i]
+        # a moving clip for this beat plays first; the still covers whatever is left of the beat
+        cp = clip_path(job_id, b["id"])
+        if os.path.exists(cp):
+            clen = min(dur, max(1.0, duration(cp) - 0.1))
+            if dur - clen < 1.2:  # never leave a tiny still sliver after the clip
+                clen = dur
+            f0, f1 = round(t * FPS), round((t + clen) * FPS)
+            out = os.path.join(shots_dir, f"s{k:04d}.mp4")
+            is_last = (i == len(beats) - 1 and clen >= dur)
+            jobs.append(dict(clip=cp, out=out, frames=f1 - f0, w=W, h=H,
+                             fade_in=(0.4 if k == 0 else (0.6 if ph != prev_phase else 0)),
+                             fade_out=(1.6 if is_last else 0), grain=o["grain"], crf=o["crf"]))
+            files.append(out)
+            clips_used.append(b["id"])
+            k += 1
+            t += clen
+            dur -= clen
+            prev_phase = ph
+            if dur <= 0.05:
+                continue
         subs = video.split_long(dur)
         speed = 0.012 if ph >= 6 else 0.007
-        t = starts[i]
         for si, sd in enumerate(subs):
             f0, f1 = round(t * FPS), round((t + sd) * FPS)
             t += sd
@@ -137,7 +158,7 @@ def render(job_id: str, options: dict = None, progress=None) -> dict:
     real = duration(master)
     qa = {"expected_s": round(total, 2), "actual_s": round(real, 2),
           "sync_ok": abs(real - total) < 0.6, "size_mb": round(os.path.getsize(master) / 1e6, 1),
-          "missing_images": missing, "shots": len(jobs),
+          "missing_images": missing, "shots": len(jobs), "clips": clips_used,
           "duration_ok": 11 * 60 <= real <= 19 * 60}
     result = {"master": "out/master.mp4", "srt": "out/subtitles.srt", "duration": round(real, 2),
               "voice_end": v_end, "end_screen_start": end_start, "phase_starts": ps,

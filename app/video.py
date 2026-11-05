@@ -135,16 +135,47 @@ def render_shot(img, out, frames, mot, w, h, fade_in=0.0, fade_out=0.0, flicker=
     return out
 
 
+def render_clip(clip, out, frames, w, h, fade_in=0.0, fade_out=0.0, grain=0, crf=21, vertical=False):
+    """A moving clip as one shot: same frame size, grade and vignette as the stills, no audio.
+    A clip shorter than the shot holds its last frame."""
+    N = max(1, frames)
+    dur = N / FPS
+    if vertical:
+        fit = f"scale=-2:{h},crop={w}:{h}"
+    else:
+        fit = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+    vf = [f"fps={FPS}", fit, "eq=contrast=1.08:brightness=-0.025:saturation=0.78",
+          "colorbalance=rs=-0.02:bs=0.035:rm=-0.01:bm=0.02", "vignette=PI/4.5",
+          f"tpad=stop_mode=clone:stop_duration={dur:.2f}", "setsar=1"]
+    if grain:
+        vf.append(f"noise=alls={int(grain)}:allf=t")
+    if fade_in > 0:
+        vf.append(f"fade=t=in:st=0:d={fade_in:.2f}")
+    if fade_out > 0:
+        vf.append(f"fade=t=out:st={max(0, dur - fade_out):.2f}:d={fade_out:.2f}")
+    vf.append("format=yuv420p")
+    ffmpeg("-i", clip, "-vf", ",".join(vf), "-frames:v", str(N), "-r", str(FPS),
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+           "-maxrate", "5M", "-bufsize", "10M", "-g", str(FPS * 2), "-an", out, timeout=1800)
+    return out
+
+
 def render_many(jobs):
-    """jobs: list of kwargs for render_shot. Runs in parallel threads (ffmpeg does the work)."""
+    """jobs: list of kwargs for render_shot (or render_clip when the job has 'clip').
+    Runs in parallel threads (ffmpeg does the work)."""
     seen = set()
     for k in jobs:  # grade each still once, serially (no two threads writing one file)
+        if k.get("clip"):
+            continue
         key = (k["img"], k["w"], k["h"], k.get("vertical", False))
         if key not in seen:
             seen.add(key)
             prepare_still(*key)
+
+    def one(k):
+        return render_clip(**k) if k.get("clip") else render_shot(**k)
     with ThreadPoolExecutor(max_workers=RENDER_THREADS) as ex:
-        list(ex.map(lambda k: render_shot(**k), jobs))
+        list(ex.map(one, jobs))
 
 
 def concat(files, out):

@@ -9,7 +9,7 @@ import shutil
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import drive, gemini, music, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
+from . import clips, drive, gemini, music, images, render_long, render_short, review, sfx, tasks, thumbnail, tts
 from .config import MOCK_MODE, RENDER_KEY, WORK_DIR, PUBLIC_BASE_URL, font
 from .storage import cleanup_intermediates, cleanup_old_jobs, get_data, job_path, put_data, safe
 
@@ -132,6 +132,20 @@ def list_images(job_id: str, request: Request):
     _auth(request)
     d = os.path.dirname(job_path(job_id, "images", "x"))
     return {"images": sorted(f[:-4] for f in os.listdir(d) if f.endswith(".png"))}
+
+
+# ------------------------------------------------------------------ moving clips (Veo, image -> video)
+@app.get("/clips/models")
+def clip_models(request: Request):
+    _auth(request)
+    return {"models": clips.list_models()}
+
+
+@app.post("/clips/generate")
+def clips_generate(request: Request, p: dict = Body(...)):
+    _auth(request)
+    return tasks.submit("clip", p["job_id"], clips.generate, p["job_id"], p["items"], p["model"],
+                        int(p.get("duration_s", 8)), int(p.get("max_clips", 20)))
 
 
 # ------------------------------------------------------------------ sound library
