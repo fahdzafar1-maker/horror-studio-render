@@ -29,9 +29,20 @@ def _h():
 
 
 def list_models() -> list:
-    r = requests.get(f"{GEMINI_BASE}?pageSize=1000", headers=_h(), timeout=60)
-    r.raise_for_status()
-    return [m["name"] for m in r.json().get("models", []) if "veo" in m["name"]]
+    """Every model the key can use that can make videos (Veo), across all result pages."""
+    names, token = [], ""
+    for _ in range(20):
+        r = requests.get(f"{GEMINI_BASE}?pageSize=200" + (f"&pageToken={token}" if token else ""),
+                         headers=_h(), timeout=60)
+        r.raise_for_status()
+        j = r.json()
+        for m in j.get("models", []):
+            if "veo" in m["name"].lower() or "predictLongRunning" in m.get("supportedGenerationMethods", []):
+                names.append(m["name"].split("/", 1)[-1])
+        token = j.get("nextPageToken", "")
+        if not token:
+            break
+    return names
 
 
 def _find_uri(o):
