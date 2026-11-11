@@ -7,8 +7,54 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PIL import Image
 
-from .config import FPS, RENDER_THREADS
+from .config import FPS, RENDER_THREADS, WORK_DIR
 from .util import ffmpeg
+
+FX_DIR = os.path.join(WORK_DIR, "fx")
+FX_OPACITY = {"fog": 0.30, "rain": 0.38}
+
+
+def fx_asset(kind: str) -> str:
+    """Free atmosphere layers, made once and cached: a drifting fog plate (wide PNG) and a looping
+    rain clip. They are screen-blended over a shot, so black = no change."""
+    os.makedirs(FX_DIR, exist_ok=True)
+    if kind == "fog":
+        out = os.path.join(FX_DIR, "fog_v1.png")
+        if not os.path.exists(out):
+            rng = np.random.default_rng(7)
+            small = (rng.random((27, 96)) ** 2.2 * 255).astype(np.uint8)
+            im = Image.fromarray(small, "L").resize((3840, 1080), Image.BICUBIC)
+            from PIL import ImageFilter
+            im = im.filter(ImageFilter.GaussianBlur(40))
+            a = np.asarray(im).astype(np.float32)
+            a = (a - a.min()) / max(1.0, a.max() - a.min()) * 150
+            # the plate wraps around: blend its two ends so the drift has no seam
+            ramp = np.linspace(0, 1, 400)[None, :]
+            a[:, -400:] = a[:, -400:] * (1 - ramp) + a[:, :400] * ramp
+            Image.fromarray(a.astype(np.uint8), "L").convert("RGB").save(out)
+        return out
+    if kind == "rain":
+        out = os.path.join(FX_DIR, "rain_v1.mp4")
+        if not os.path.exists(out):
+            from PIL import ImageDraw
+            tmp = os.path.join(FX_DIR, "rain_frames")
+            os.makedirs(tmp, exist_ok=True)
+            rng = np.random.default_rng(11)
+            n = 30  # one-second loop: every drop travels a whole multiple of the 1180 px wrap
+            drops = [(rng.uniform(0, 2100), rng.uniform(0, 1180), 1180 / n * int(rng.integers(1, 3)),
+                      rng.uniform(30, 75), int(rng.uniform(70, 170))) for _ in range(420)]
+            for f in range(n):
+                im = Image.new("RGB", (1920, 1080), (0, 0, 0))
+                d = ImageDraw.Draw(im)
+                for x, y, speed, ln, c in drops:
+                    yy = (y + speed * f) % 1180 - 100
+                    xx = x - yy * 0.18
+                    d.line([(xx, yy), (xx - ln * 0.18, yy + ln)], fill=(c, c, c), width=1)
+                im.save(os.path.join(tmp, f"r{f:03d}.png"))
+            ffmpeg("-framerate", str(FPS), "-i", os.path.join(tmp, "r%03d.png"), "-c:v", "libx264",
+                   "-pix_fmt", "yuv420p", "-crf", "18", out)
+        return out
+    raise ValueError(f"unknown fx {kind}")
 
 
 def bars_crop(img):
@@ -113,7 +159,7 @@ def shake(amp):
 
 
 def render_shot(img, out, frames, mot, w, h, fade_in=0.0, fade_out=0.0, flicker=False,
-                grain=0, crf=21, vertical=False, shake_amp=0.0):
+                grain=0, crf=21, vertical=False, shake_amp=0.0, fx=None):
     z0, z1, x0, x1, y0, y1 = mot
     N = max(1, frames)
     still = prepare_still(img, w, h, vertical)
@@ -129,9 +175,22 @@ def render_shot(img, out, frames, mot, w, h, fade_in=0.0, fade_out=0.0, flicker=
     if fade_out > 0:
         vf.append(f"fade=t=out:st={max(0, dur - fade_out):.2f}:d={fade_out:.2f}")
     vf.append("format=yuv420p")
-    ffmpeg("-i", still, "-vf", ",".join(vf), "-frames:v", str(N), "-r", str(FPS),
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
-           "-maxrate", "5M", "-bufsize", "10M", "-g", str(FPS * 2), "-an", out, timeout=1800)
+    enc = ["-frames:v", str(N), "-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+           "-maxrate", "5M", "-bufsize", "10M", "-g", str(FPS * 2), "-an", out]
+    if fx in FX_OPACITY and not vertical:
+        base = [x for x in vf if not x.startswith("fade=") and x != "format=yuv420p"]
+        post = [x for x in vf if x.startswith("fade=")] + ["format=yuv420p"]
+        if fx == "fog":
+            src = ["-loop", "1", "-framerate", str(FPS), "-i", fx_asset("fog")]
+            layer = f"crop={w}:{h}:x='mod(t*22\\,3840-{w})':y=0"
+        else:
+            src = ["-stream_loop", "-1", "-i", fx_asset("rain")]
+            layer = f"scale={w}:{h}"
+        fc = (f"[0:v]{','.join(base)},format=gbrp[b];[1:v]{layer},fps={FPS},format=gbrp[f];"
+              f"[b][f]blend=all_mode=screen:all_opacity={FX_OPACITY[fx]}:shortest=1,{','.join(post)}[v]")
+        ffmpeg("-i", still, *src, "-filter_complex", fc, "-map", "[v]", *enc, timeout=1800)
+        return out
+    ffmpeg("-i", still, "-vf", ",".join(vf), *enc, timeout=1800)
     return out
 
 

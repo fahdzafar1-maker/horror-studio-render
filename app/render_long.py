@@ -107,6 +107,7 @@ def render(job_id: str, options: dict = None, progress=None) -> dict:
                              # on every third frame of the Point-blank/Climax; handheld shake at the climax
                              flicker=(ph >= 6 and b.get("subject") == "entity") or (ph in (8, 9) and k % 3 == 0),
                              shake_amp=(3.0 if ph in (8, 9) else 0.0),
+                             fx=b.get("fx"),  # free atmosphere layer chosen in the beats (fog / rain)
                              grain=o["grain"], crf=o["crf"]))
             files.append(out)
             k += 1
